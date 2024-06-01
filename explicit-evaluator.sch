@@ -89,7 +89,7 @@ apply-dispatch
     (branch (label compound-apply))
     (goto (label unknown-procedure-type))
 primitive-apply
-    (assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+    (assign val (op apply-primitive-procedure) (reg proc) (reg argl) (reg env))
     (restore continue)
     (goto (reg continue))
 compound-apply

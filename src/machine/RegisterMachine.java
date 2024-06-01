@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -27,7 +28,7 @@ public class RegisterMachine {
     // Dynamic memory
     private final Map<String, Primitive[]> vectors = new HashMap<>();
 
-    private final Map<String, Function<Primitive, Primitive>> builtin = new HashMap<>();
+    private final Map<String, BiFunction<Primitive, Primitive, Primitive>> builtin = new HashMap<>();
 
     public RegisterMachine(Expression machine) {
         vectors.put("the-cars", new Primitive[50]);
@@ -35,7 +36,7 @@ public class RegisterMachine {
         vectors.put("new-cars", new Primitive[50]);
         vectors.put("new-cdrs", new Primitive[50]);
 
-        builtin.put("+", (parameter) -> {
+        builtin.put("+", (parameter, env) -> {
             int x = parameter.
                     accept(DefaultPrimitiveVisitor.getPair).
                     getCar().
@@ -51,10 +52,80 @@ public class RegisterMachine {
             return new NumberPrimitive(x + y);
         });
 
+        builtin.put("-", (parameter, env) -> {
+            int x = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            int y = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCdr().
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            return new NumberPrimitive(x - y);
+        });
+
+        builtin.put("*", (parameter, env) -> {
+            int x = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            int y = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCdr().
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            return new NumberPrimitive(x * y);
+        });
+
+        builtin.put("=", (parameter, env) -> {
+            int x = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            int y = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCdr().
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getNumber).
+                    getValue();
+            return new BooleanPrimitive(x == y);
+        });
+
+        builtin.put("set!", (parameter, env) -> {
+            String name = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar().
+                    accept(DefaultPrimitiveVisitor.getQuote).
+                    getQuote();
+            Primitive value = parameter.
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCdr().
+                    accept(DefaultPrimitiveVisitor.getPair).
+                    getCar();
+
+            lookupVariable(name, env).accept(DefaultPrimitiveVisitor.getPair).setCdr(value);
+            return value;
+        });
+
         ops.put("print!", parameters -> {
             parameters.forEach(System.out::println);
             return NothingPrimitive.SINGLETON;
         });
+
+        ops.put("nil", parameters -> NothingPrimitive.SINGLETON);
+
+        ops.put("list", parameters -> PairPrimitive.fromParameter(parameters.toArray(new Primitive[0])));
+
+        ops.put("cons", parameters -> new PairPrimitive(parameters.get(0), parameters.get(1)));
 
         ops.put("=", new ArithmeticOperation() {
             @Override
@@ -272,7 +343,7 @@ public class RegisterMachine {
 
         ops.put("apply-primitive-procedure", parameters -> {
             String name = parameters.get(0).accept(DefaultPrimitiveVisitor.getPair).getCdr().accept(DefaultPrimitiveVisitor.getQuote).getQuote();
-            return builtin.get(name).apply(parameters.get(1));
+            return builtin.get(name).apply(parameters.get(1), parameters.get(2));
         });
 
         ops.put("procedure-parameters", parameters ->
@@ -404,6 +475,24 @@ public class RegisterMachine {
             env.setCar(new PairPrimitive(pair, env.getCar()));
             return env;
         });
+
+        ops.put("make-compiled-procedure", parameters -> PairPrimitive.fromParameter(new QuotePrimitive("lambda"), parameters.get(0), parameters.get(1)));
+        ops.put("compiled-procedure-entry", parameters -> parameters.get(0).
+                accept(DefaultPrimitiveVisitor.getPair).
+                getCdr().
+                accept(DefaultPrimitiveVisitor.getPair).
+                getCar()
+        );
+        ops.put("compiled-procedure-env", parameters -> parameters.get(0).
+                accept(DefaultPrimitiveVisitor.getPair).
+                getCdr().
+                accept(DefaultPrimitiveVisitor.getPair).
+                getCdr().
+                accept(DefaultPrimitiveVisitor.getPair).
+                getCar()
+        );
+
+        ops.put("false?", parameters -> new BooleanPrimitive(!parameters.get(0).accept(DefaultPrimitiveVisitor.getBoolean).isValue()));
 
         // Init registers
         machine.getHead().getList().stream().map(Expression::getSymbol).forEach((name) -> registers.put(name, new NumberPrimitive(0)));

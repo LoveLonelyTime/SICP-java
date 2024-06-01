@@ -10,13 +10,13 @@ import java.util.Scanner;
 // Have fun!
 public class Main {
     public static void main(String[] args) {
-        EvaluationEvaluator evaluator = new ApplicativeEvaluator();
+        EvaluationVisitor<Environment, Primitive> evaluator = new ApplicativeEvaluator();
         // or EvaluationEvaluator evaluator = new LazyEvaluator();
         Scanner input = new Scanner(System.in);
         while (true){
             System.out.print("?>>");
             LispParser.parseExpression(new Cursor(input.nextLine()))
-                    .ifPresentOrElse((e) -> System.out.println(evaluator.eval(EvaluationBuilder.build(e))),
+                    .ifPresentOrElse((e) -> System.out.println(evaluator.visit(EvaluationBuilder.build(e))),
                     () -> System.out.println("Syntax error"));
         }
     }

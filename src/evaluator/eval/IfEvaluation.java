@@ -44,8 +44,9 @@ public class IfEvaluation implements Evaluation {
                 '}';
     }
 
+
     @Override
-    public Primitive accept(EvaluationEvaluator evaluator, Environment env) {
-        return evaluator.eval(this, env);
+    public <T, R> R accept(EvaluationVisitor<T, R> visitor, T t) {
+        return visitor.visit(this, t);
     }
 }

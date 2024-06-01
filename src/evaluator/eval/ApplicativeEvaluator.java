@@ -3,16 +3,16 @@ package evaluator.eval;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class ApplicativeEvaluator implements EvaluationEvaluator {
+public class ApplicativeEvaluator implements EvaluationVisitor<Environment, Primitive> {
     private final Environment globalEnv = Environment.createGlobalEnvironment();
 
     @Override
-    public Primitive eval(Evaluation e){
+    public Primitive visit(Evaluation e){
         return e.accept(this, globalEnv);
     }
 
     @Override
-    public Primitive eval(BeginEvaluation e, Environment env) {
+    public Primitive visit(BeginEvaluation e, Environment env) {
         return e.getEvaluations().stream().
                 map(exp->exp.accept(this, env)).
                 reduce((f,s)->s). // Get last
@@ -20,12 +20,12 @@ public class ApplicativeEvaluator implements EvaluationEvaluator {
     }
 
     @Override
-    public Primitive eval(DefineEvaluation e, Environment env) {
+    public Primitive visit(DefineEvaluation e, Environment env) {
         return env.define(e.getName(), e.getValue().accept(this, env));
     }
 
     @Override
-    public Primitive eval(IfEvaluation e, Environment env) {
+    public Primitive visit(IfEvaluation e, Environment env) {
         if(e.getCondition().accept(this, env).accept(new DefaultPrimitiveVisitor<>() {
             @Override
             public Boolean visit(BooleanPrimitive primitive) {
@@ -39,17 +39,17 @@ public class ApplicativeEvaluator implements EvaluationEvaluator {
     }
 
     @Override
-    public Primitive eval(LambdaEvaluation e, Environment env) {
+    public Primitive visit(LambdaEvaluation e, Environment env) {
         return new LambdaPrimitive(e.getArguments(), e.getBody(), env);
     }
 
     @Override
-    public Primitive eval(NumberEvaluation e, Environment env) {
+    public Primitive visit(NumberEvaluation e, Environment env) {
         return new NumberPrimitive(e.getValue());
     }
 
     @Override
-    public Primitive eval(ProcedureEvaluation e, Environment env) {
+    public Primitive visit(ProcedureEvaluation e, Environment env) {
         Primitive operator = e.getOperator().accept(this, env);
         List<Primitive> parameters = e.getParameters().stream().map((exp)->exp.accept(this, env)).collect(Collectors.toList());
 
@@ -69,12 +69,12 @@ public class ApplicativeEvaluator implements EvaluationEvaluator {
     }
 
     @Override
-    public Primitive eval(QuoteEvaluation e, Environment env) {
+    public Primitive visit(QuoteEvaluation e, Environment env) {
         return new QuotePrimitive(e.getName());
     }
 
     @Override
-    public Primitive eval(VariableEvaluation e, Environment env) {
+    public Primitive visit(VariableEvaluation e, Environment env) {
         return env.lookup(e.getName());
     }
 }

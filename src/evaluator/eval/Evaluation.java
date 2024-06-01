@@ -1,5 +1,5 @@
 package evaluator.eval;
 
 public interface Evaluation {
-    Primitive accept(EvaluationEvaluator evaluator, Environment env);
+    <T, R> R accept(EvaluationVisitor<T, R> visitor, T t);
 }
