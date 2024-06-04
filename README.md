@@ -11,3 +11,4 @@ Code list:
 6. Register-Machine (5.2) : `src/machine/RegisterMachine.java` An implementation of Register-Machine.
 7. Allocation and Garbage Collection (5.3) : `src/machine/RegisterMachine.java` GC.
 8. Explicit-Control Evaluator (5.4) : `src/machine/RegisterMachine.java` An implementation of Explicit-Control evaluator.
+9. Compiler (5.5) : `src/compiler/Compiler.java` An implementation of compiler.
