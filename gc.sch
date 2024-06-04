@@ -1,31 +1,31 @@
 ((free scan root old relocate-continue oldcr the-cars the-cdrs new-cars new-cdrs car cdr val continue)
 (
 start
-    (assign the-cars (const the-cars))
-    (assign the-cdrs (const the-cdrs))
-    (assign new-cars (const new-cars))
-    (assign new-cdrs (const new-cdrs))
+    (assign the-cars (op create-vector) (const 50) (const nothing))
+    (assign the-cdrs (op create-vector) (const 50) (const nothing))
+    (assign new-cars (op create-vector) (const 50) (const nothing))
+    (assign new-cdrs (op create-vector) (const 50) (const nothing))
 
     (assign free (const 0))
 
-    (assign car (const a))
-    (assign cdr (const nil))
+    (assign car (const (quote a)))
+    (assign cdr (const nothing))
     (assign continue (label P1))
     (goto (label cons))
 P1
-    (assign car (const b))
+    (assign car (const (quote b)))
     (assign cdr (reg val))
     (assign continue (label P2))
     (goto (label cons))
 P2
-    (assign car (const c))
+    (assign car (const (quote c)))
     (assign cdr (reg val))
     (assign continue (label P3))
     (goto (label cons))
 P3
     (assign root (reg val))
     (assign root (op vector-ref) (reg the-cdrs) (reg root))
-    (perform (op print!) (reg free))
+    (perform (op print) (reg free))
 
 begin-garbage-collection
     (assign free (const 0))
@@ -95,5 +95,5 @@ cons
     (goto (reg continue))
 
 end
-    (perform (op print!) (reg free))
+    (perform (op print) (reg free))
 ))

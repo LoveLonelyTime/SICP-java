@@ -1,6 +1,7 @@
 package machine;
 
 import parser.Cursor;
+import parser.Expression;
 import parser.LispParser;
 
 import java.io.IOException;
@@ -13,12 +14,12 @@ import java.nio.file.Path;
 // Have fun!
 public class Main {
     public static void main(String[] args) throws IOException {
-        String source = Files.readString(Path.of("explicit-evaluator.sch"));
+        RegisterMachine registerMachine = new RegisterMachine();
 
-        LispParser.parseExpression(new Cursor(source))
-                .ifPresentOrElse((e) -> {
-                    RegisterMachine machine = new RegisterMachine(e);
-                    machine.execute();
-                }, () -> System.out.println("Syntax error"));
+        String source = Files.readString(Path.of("explicit-evaluator.sch"));
+        Expression code = LispParser.parseExpression(new Cursor(source));
+        registerMachine.appendCode(code);
+
+        registerMachine.execute();
     }
 }

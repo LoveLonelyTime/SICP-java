@@ -3,19 +3,19 @@ package compiler;
 public class Context {
     public static final String LINKAGE_RETURN = "return";
     public static final String LINKAGE_NEXT = "next";
-    private String target;
+    private Reg target;
     private String linkage;
 
-    public Context(String target, String linkage) {
+    public Context(Reg target, String linkage) {
         this.target = target;
         this.linkage = linkage;
     }
 
-    public String getTarget() {
+    public Reg getTarget() {
         return target;
     }
 
-    public void setTarget(String target) {
+    public void setTarget(Reg target) {
         this.target = target;
     }
 
@@ -30,7 +30,7 @@ public class Context {
     @Override
     public String toString() {
         return "Context{" +
-                "target='" + target + '\'' +
+                "target=" + target +
                 ", linkage='" + linkage + '\'' +
                 '}';
     }

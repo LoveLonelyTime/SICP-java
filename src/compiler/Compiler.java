@@ -1,106 +1,91 @@
 package compiler;
 
-import evaluator.eval.*;
+import evaluator.*;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
+
+import static compiler.Context.LINKAGE_NEXT;
+import static compiler.Context.LINKAGE_RETURN;
+import static compiler.InstSequence.*;
+import static compiler.InstType.*;
+import static compiler.Parameter.*;
+import static compiler.Reg.*;
 
 public class Compiler implements EvaluationVisitor<Context, InstSequence> {
-
     private int counter = 0;
-    private InstSequence compileLinkage(String linkage){
-        if(linkage.equals(Context.LINKAGE_RETURN)){
+
+    private InstSequence compileLinkage(String linkage) {
+        if (linkage.equals(LINKAGE_RETURN)) {
             return new InstSequenceBuilder().
-                    addNeeds("continue").
-                    addInst("(goto (reg continue))").
+                    setType(GOTO).
+                    addParameter(reg(CONTINUE)).
                     build();
-        } else if(linkage.equals(Context.LINKAGE_NEXT)){
-            return new InstSequenceBuilder().
-                    build();
+        } else if (linkage.equals(LINKAGE_NEXT)) {
+            return new InstSequence();
         } else {
             return new InstSequenceBuilder().
-                    addInst(String.format("(goto (label %s))", linkage)).
+                    setType(GOTO).
+                    addParameter(label(linkage)).
                     build();
         }
     }
 
-    private InstSequence endWithLinkage(String linkage, InstSequence instSequence){
-        return preserving(instSequence, compileLinkage(linkage), "continue");
+    private InstSequence endWithLinkage(String linkage, InstSequence instSequence) {
+        return preserving(instSequence, compileLinkage(linkage), CONTINUE);
     }
 
-    private InstSequence preserving(InstSequence i1, InstSequence i2, String... preserved){
-        if (preserved.length == 0){
-            return new InstSequenceBuilder().merge(i1).merge(i2).build();
-        } else {
-            if(i1.getModifies().contains(preserved[0]) && i2.getNeeds().contains(preserved[0])){
-                InstSequence wrapped = new InstSequenceBuilder().
-                        addInst(String.format("(save %s)", preserved[0])).
-                        merge(i1).
-                        addInst(String.format("(restore %s)", preserved[0])).
-                        build();
-                wrapped.getNeeds().add(preserved[0]);
-                wrapped.getModifies().remove(preserved[0]);
-                return preserving(wrapped, i2, Arrays.copyOfRange(preserved, 1, preserved.length));
-            } else {
-                return preserving(i1, i2, Arrays.copyOfRange(preserved, 1, preserved.length));
-            }
-        }
-    }
-
-    private InstSequence tackOnInstSequence(InstSequence i1, InstSequence i2){
-        InstSequence instSequence = new InstSequenceBuilder().merge(i1).build();
-        instSequence.getStatements().addAll(i2.getStatements());
-        return instSequence;
-    }
-
-    private InstSequence parallelInstSequence(InstSequence i1, InstSequence i2){
-        InstSequence instSequence = new InstSequenceBuilder().merge(i1).build();
-        instSequence.getNeeds().addAll(i2.getNeeds());
-        instSequence.getModifies().addAll(i2.getModifies());
-        instSequence.getStatements().addAll(i2.getStatements());
-        return instSequence;
-    }
-
-    private String makeLabel(String label){
+    private String makeLabel(String label) {
         counter++;
         return label + "-" + counter;
     }
 
     @Override
     public InstSequence visit(Evaluation e) {
-        return new InstSequenceBuilder().
-                addModifies("env").
-                addInst("(assign env (op get-global-environment))").
-                merge(e.accept(this, new Context("val", Context.LINKAGE_NEXT))).
-                addNeeds("val").
-                addInst("(perform (op print!) (reg val))").
-                build();
+        return append(
+                new InstSequenceBuilder().
+                        setType(ASSIGN).
+                        setReg(ENV).
+                        addParameter(op("get-global-environment")).
+                        build(),
+                e.accept(this, new Context(VAL, Context.LINKAGE_NEXT)),
+                new InstSequenceBuilder().
+                        setType(PERFORM).
+                        addParameter(op("print")).
+                        addParameter(reg(VAL)).
+                        build()
+        );
     }
 
     @Override
     public InstSequence visit(BeginEvaluation e, Context context) {
-        InstSequence instSequence = new InstSequenceBuilder().build();
-        for(int i = e.getEvaluations().size() - 1 ; i >= 0; i--){
-            InstSequence parallel = e.getEvaluations().get(i).accept(this, new Context(context.getTarget(), Context.LINKAGE_NEXT));
-            instSequence = preserving(parallel, instSequence, "env");
+        InstSequence instSequence = new InstSequence();
+        for (int i = e.getEvaluations().size() - 1; i >= 0; i--) {
+            InstSequence block = e.getEvaluations().get(i).accept(this, new Context(context.getTarget(), LINKAGE_NEXT));
+            instSequence = preserving(block, instSequence, ENV);
         }
         return endWithLinkage(context.getLinkage(), instSequence);
     }
 
     @Override
     public InstSequence visit(DefineEvaluation e, Context context) {
-        InstSequence getValueInsts = e.getValue().accept(this, new Context("val", Context.LINKAGE_NEXT));
-        InstSequence instSequence = new InstSequenceBuilder().
-                addNeeds("env", "val").
-                addModifies(context.getTarget()).
-                addInst(String.format("(perform (op define-variable!) (const %s) (reg val) (reg env))", e.getName())).
-                addInst(String.format("(assign %s (const ok))", context.getTarget())).
-                build();
-
-        return endWithLinkage(context.getLinkage(), preserving(getValueInsts, instSequence, "env"));
+        InstSequence getValueInsts = e.getValue().accept(this, new Context(VAL, LINKAGE_NEXT));
+        InstSequence instSequence = append(
+                new InstSequenceBuilder().
+                        setType(PERFORM).
+                        addParameter(op("define-variable!")).
+                        addParameter(conzt("(quote "+e.getName()+")")).
+                        addParameter(reg(VAL)).
+                        addParameter(reg(ENV)).
+                        build(),
+                new InstSequenceBuilder().
+                        setType(ASSIGN).
+                        setReg(VAL).
+                        addParameter(conzt("(quote ok)")).
+                        build()
+        );
+        return endWithLinkage(context.getLinkage(), preserving(getValueInsts, instSequence, ENV));
     }
 
     @Override
@@ -108,21 +93,31 @@ public class Compiler implements EvaluationVisitor<Context, InstSequence> {
         String afterIf = makeLabel("after-if");
         String trueBranch = makeLabel("true-branch");
         String falseBranch = makeLabel("false-branch");
-        InstSequence getConditionInsts = e.getCondition().accept(this, new Context("val", Context.LINKAGE_NEXT));
-        InstSequence consequentInsts = e.getConsequent().accept(this, new Context(context.getTarget(), context.getLinkage().equals(Context.LINKAGE_NEXT) ? afterIf : context.getLinkage()));
+
+        InstSequence getConditionInsts = e.getCondition().accept(this, new Context(VAL, Context.LINKAGE_NEXT));
+        InstSequence consequentInsts = e.getConsequent().accept(this, new Context(context.getTarget(), context.getLinkage().equals(LINKAGE_NEXT) ? afterIf : context.getLinkage()));
         InstSequence alternativeInsts = e.getAlternative().accept(this, new Context(context.getTarget(), context.getLinkage()));
 
-        consequentInsts = new InstSequenceBuilder().addInst(trueBranch).merge(consequentInsts).build();
-        alternativeInsts = new InstSequenceBuilder().addInst(falseBranch).merge(alternativeInsts).build();
+        InstSequence instSequence = append(
+                append(
+                        new InstSequenceBuilder().
+                                setType(TEST).
+                                addParameter(op("false?")).
+                                addParameter(reg(VAL)).
+                                build(),
+                        new InstSequenceBuilder().
+                                setType(BRANCH).
+                                addParameter(label(falseBranch)).
+                                build()
+                ),
+                parallel(
+                        attach(trueBranch, consequentInsts),
+                        attach(falseBranch, alternativeInsts)
+                ),
+                attach(afterIf)
+        );
 
-        InstSequence instSequence = new InstSequenceBuilder().
-                addNeeds("val").
-                addInst("(test (op false?) (reg val))").
-                addInst(String.format("(branch (label %s))", falseBranch)).
-                merge(parallelInstSequence(consequentInsts, alternativeInsts)).
-                addInst(afterIf).
-                build();
-        return preserving(getConditionInsts, instSequence, "env", "continue");
+        return preserving(getConditionInsts, instSequence, ENV, CONTINUE);
     }
 
     @Override
@@ -130,163 +125,226 @@ public class Compiler implements EvaluationVisitor<Context, InstSequence> {
         String entry = makeLabel("lambda-entry");
         String afterLambda = makeLabel("after-lambda");
 
+        InstSequence body = buildLambdaBody(e, entry);
+
         InstSequence instSequence = new InstSequenceBuilder().
-                addNeeds("env").
-                addModifies(context.getTarget()).
-                addInst(String.format("(assign %s (op make-compiled-procedure) (label %s) (reg env))", context.getTarget(), entry)).
+                setType(ASSIGN).
+                setReg(context.getTarget()).
+                addParameter(op("make-compiled-procedure")).
+                addParameter(label(entry)).
+                addParameter(reg(ENV)).
                 build();
 
-        instSequence = endWithLinkage(context.getLinkage().equals(Context.LINKAGE_NEXT) ? afterLambda : context.getLinkage(), instSequence);
-        instSequence = tackOnInstSequence(instSequence, buildLambdaBody(e, entry));
-        return new InstSequenceBuilder().merge(instSequence).addInst(afterLambda).build();
+        return tackOn(
+                endWithLinkage(context.getLinkage().equals(Context.LINKAGE_NEXT) ? afterLambda : context.getLinkage(), instSequence),
+                append(
+                        body,
+                        attach(afterLambda)
+                )
+        );
     }
 
-    private InstSequence buildLambdaBody(LambdaEvaluation e, String entry){
-        String arguments = e.getArguments().stream().map((name) -> String.format("(const %s)",name)).collect(Collectors.joining(" "));
-        InstSequence instSequence = e.getBody().accept(this, new Context("val", Context.LINKAGE_RETURN));
-        return new InstSequenceBuilder().
-                addNeeds("proc", "argl").
-                addModifies("env", "val").
-                addInst(entry).
-                addInst("(assign env (op compiled-procedure-env) (reg proc))").
-                addInst(String.format("(assign val (op list) %s)", arguments)).
-                addInst("(assign env (op extend-environment) (reg val) (reg argl) (reg env))").
-                merge(instSequence).
-                build();
+    private InstSequence buildLambdaBody(LambdaEvaluation e, String entry) {
+        InstSequenceBuilder setParametersInsts = new InstSequenceBuilder().
+                setType(ASSIGN).
+                setReg(VAL).
+                addParameter(op("list"));
+        e.getArguments().forEach(name -> setParametersInsts.addParameter(conzt("(quote " + name + ")")));
+
+        InstSequence instSequence = e.getBody().accept(this, new Context(VAL, Context.LINKAGE_RETURN));
+
+        return attach(
+                entry,
+                append(new InstSequenceBuilder().
+                                setType(ASSIGN).
+                                setReg(ENV).
+                                addParameter(op("compiled-procedure-env")).
+                                addParameter(reg(PROC)).
+                                build(),
+                        setParametersInsts.build(),
+                        new InstSequenceBuilder().
+                                setType(ASSIGN).
+                                setReg(ENV).
+                                addParameter(op("extend-environment")).
+                                addParameter(reg(VAL)).
+                                addParameter(reg(ARGL)).
+                                addParameter(reg(ENV)).
+                                build(),
+                        instSequence
+                )
+        );
     }
 
     @Override
     public InstSequence visit(NumberEvaluation e, Context context) {
-        // Warning: Double -> Int
         InstSequence instSequence = new InstSequenceBuilder().
-                addModifies(context.getTarget()).
-                addInst(String.format("(assign %s (const %s))", context.getTarget(), (int) e.getValue())).
+                setType(ASSIGN).
+                setReg(context.getTarget()).
+                addParameter(conzt(Double.toString(e.getValue()))).
                 build();
         return endWithLinkage(context.getLinkage(), instSequence);
     }
 
     @Override
     public InstSequence visit(ProcedureEvaluation e, Context context) {
-        InstSequence operatorInsts = e.getOperator().accept(this, new Context("proc", Context.LINKAGE_NEXT));
+        InstSequence operatorInsts = e.getOperator().accept(this, new Context(PROC, Context.LINKAGE_NEXT));
         List<Evaluation> parameters = new ArrayList<>(e.getParameters()); // Reverse
         Collections.reverse(parameters);
         InstSequence constructArgListInsts = constructArgList(parameters);
         InstSequence proc = procedureCall(context);
-        return preserving(operatorInsts, preserving(constructArgListInsts, proc, "proc", "continue", "env"), "env", "continue");
+        return preserving(operatorInsts,
+                preserving(constructArgListInsts,
+                        proc,
+                        PROC, ENV, CONTINUE),
+                ENV, CONTINUE);
     }
 
-    private InstSequence constructArgList(List<Evaluation> parameters){
-        if(parameters.isEmpty()){
+    private InstSequence constructArgList(List<Evaluation> parameters) {
+        if (parameters.isEmpty()) {
             return new InstSequenceBuilder().
-                addModifies("argl").
-                addInst("(assign argl (op nil))").
-                build();
-        } else {
-            InstSequence getLastArg = new InstSequenceBuilder().
-                    addNeeds("val").
-                    addModifies("argl").
-                    merge(parameters.get(0).accept(this, new Context("val", Context.LINKAGE_NEXT))).
-                    addInst("(assign argl (op nil))").
-                    addInst("(assign argl (op cons) (reg val) (reg argl))").
+                    setType(ASSIGN).
+                    setReg(ARGL).
+                    addParameter(op("nil")).
                     build();
-            if(parameters.size() == 1){
+        } else {
+            InstSequence getLastArg = append(
+                    parameters.get(0).accept(this, new Context(VAL, Context.LINKAGE_NEXT)),
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(ARGL).
+                            addParameter(op("nil")).
+                            build(),
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(ARGL).
+                            addParameter(op("cons")).
+                            addParameter(reg(VAL)).
+                            addParameter(reg(ARGL)).
+                            build()
+            );
+            if (parameters.size() == 1) {
                 return getLastArg;
             } else {
-                return preserving(getLastArg, constructRestArgList(parameters.subList(1, parameters.size())), "env");
+                return preserving(getLastArg, constructRestArgList(parameters.subList(1, parameters.size())), ENV);
             }
         }
     }
 
-    private InstSequence constructRestArgList(List<Evaluation> parameters){
-        InstSequence instSequence = preserving(parameters.get(0).accept(this, new Context("val", Context.LINKAGE_NEXT)),
+    private InstSequence constructRestArgList(List<Evaluation> parameters) {
+        InstSequence instSequence = preserving(
+                parameters.get(0).accept(this, new Context(VAL, Context.LINKAGE_NEXT)),
                 new InstSequenceBuilder().
-                    addNeeds("val", "argl").
-                    addModifies("argl").
-                    addInst("(assign argl (op cons) (reg val) (reg argl))").
-                    build(), "argl");
-        if(parameters.size() == 1){
+                        setType(ASSIGN).
+                        setReg(ARGL).
+                        addParameter(op("cons")).
+                        addParameter(reg(VAL)).
+                        addParameter(reg(ARGL)).
+                        build(),
+                ARGL);
+        if (parameters.size() == 1) {
             return instSequence;
         } else {
-            return preserving(instSequence, constructRestArgList(parameters.subList(1, parameters.size())), "env");
+            return preserving(instSequence, constructRestArgList(parameters.subList(1, parameters.size())), ENV);
         }
     }
 
-    private InstSequence procedureCall(Context context){
+    private InstSequence procedureCall(Context context) {
         String primitiveBranch = makeLabel("primitive-branch");
         String compiledBranch = makeLabel("compiled-branch");
         String afterCall = makeLabel("after-call");
 
-        InstSequence compiledCall = new InstSequenceBuilder().
-                addInst(compiledBranch).
-                merge(compileCall(new Context(context.getTarget(), context.getLinkage().equals(Context.LINKAGE_NEXT) ? afterCall : context.getLinkage()))).
-                build();
-
         InstSequence primitiveCall = new InstSequenceBuilder().
-                addNeeds("argl", "env").
-                addModifies("target").
-                addInst(primitiveBranch).
-                addInst(String.format("(assign %s (op apply-primitive-procedure) (reg proc) (reg argl) (reg env))", context.getTarget())).
+                setType(ASSIGN).
+                setReg(context.getTarget()).
+                addParameter(op("apply-primitive-procedure")).
+                addParameter(reg(PROC)).
+                addParameter(reg(ARGL)).
                 build();
-
-        return new InstSequenceBuilder().
-                addNeeds("proc").
-                addInst("(test (op primitive-procedure?) (reg proc))").
-                addInst(String.format("(branch (label %s))", primitiveBranch)).
-                merge(parallelInstSequence(compiledCall, endWithLinkage(context.getLinkage(), primitiveCall))).
-                addInst(afterCall).
-                build();
+        return append(
+                new InstSequenceBuilder().
+                        setType(TEST).
+                        addParameter(op("primitive-procedure?")).
+                        addParameter(reg(PROC)).
+                        build(),
+                new InstSequenceBuilder().
+                        setType(BRANCH).
+                        addParameter(label(primitiveBranch)).
+                        build(),
+                parallel(
+                        attach(compiledBranch, compileCall(new Context(context.getTarget(), context.getLinkage().equals(LINKAGE_NEXT) ? afterCall : context.getLinkage()))),
+                        endWithLinkage(context.getLinkage(), attach(primitiveBranch, primitiveCall))
+                ),
+                attach(afterCall)
+        );
     }
 
-    private InstSequence compileCall(Context context){
-        if(context.getTarget().equals("val") && !context.getLinkage().equals(Context.LINKAGE_RETURN)){
-            return new InstSequenceBuilder().
-                    addNeeds("proc").
-                    addModifies("env", "val", "proc", "argl", "continue"). // all regs
-                    addInst(String.format("(assign continue (label %s))", context.getLinkage())).
-                    addInst("(assign val (op compiled-procedure-entry) (reg proc))").
-                    addInst("(goto (reg val))").
-                    build();
-        } else if(!context.getTarget().equals("val") && !context.getLinkage().equals(Context.LINKAGE_RETURN)) {
+    private InstSequence compileCall(Context context) {
+        if (context.getTarget().equals(VAL) && !context.getLinkage().equals(LINKAGE_RETURN)) {
+            // Set 'val' and go to label
+            return append(
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(VAL).
+                            addParameter(op("compiled-procedure-entry")).
+                            addParameter(reg(PROC)).
+                            build(),
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(CONTINUE).
+                            addParameter(label(context.getLinkage())).
+                            build(),
+                    call(new InstSequenceBuilder().setType(GOTO).addParameter(reg(VAL)).build())
+            );
+        } else if (!context.getTarget().equals(VAL) && !context.getLinkage().equals(Context.LINKAGE_RETURN)) {
+            // Set target and go to label
             String procReturn = makeLabel("proc-return");
-            return new InstSequenceBuilder().
-                    addNeeds("proc").
-                    addModifies("env", "val", "proc", "argl", "continue"). // all regs
-                    addInst(String.format("(assign continue (label %s))", procReturn)).
-                    addInst("(assign val (op compiled-procedure-entry) (reg proc))").
-                    addInst("(goto (reg val))").
-                    addInst(procReturn).
-                    addInst(String.format("(assign %s (reg val))", context.getTarget())).
-                    addInst(String.format("(goto (label %s))", context.getLinkage())).
-                    build();
-        } else if(context.getTarget().equals("val") && context.getLinkage().equals(Context.LINKAGE_RETURN)){
-            return new InstSequenceBuilder().
-                    addNeeds("proc", "continue").
-                    addModifies("env", "val", "proc", "argl", "continue"). // all regs
-                    addInst("(assign val (op compiled-procedure-entry) (reg proc))").
-                    addInst("(goto (reg val))").
-                    build();
+            return append(
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(VAL).
+                            addParameter(op("compiled-procedure-entry")).
+                            addParameter(reg(PROC)).
+                            build(),
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(CONTINUE).
+                            addParameter(label(procReturn)).
+                            build(),
+                    call(new InstSequenceBuilder().setType(GOTO).addParameter(reg(VAL)).build()),
+                    attach(procReturn),
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(context.getTarget()).
+                            addParameter(reg(VAL)).
+                            build(),
+                    new InstSequenceBuilder().
+                            setType(GOTO).
+                            addParameter(label(context.getLinkage())).
+                            build()
+            );
+        } else if (context.getTarget().equals(VAL) && context.getLinkage().equals(Context.LINKAGE_RETURN)) {
+            // Set 'VAL' and return
+            return append(
+                    new InstSequenceBuilder().
+                            setType(ASSIGN).
+                            setReg(VAL).
+                            addParameter(op("compiled-procedure-entry")).
+                            addParameter(reg(PROC)).
+                            build(),
+                    call(new InstSequenceBuilder().setType(GOTO).addParameter(reg(VAL)).build())
+            );
         } else {
-            String procReturn = makeLabel("proc-return");
-            return new InstSequenceBuilder().
-                    addNeeds("proc", "continue").
-                    addModifies("env", "val", "proc", "argl", "continue"). // all regs
-                    addInst("(save continue)").
-                    addInst(String.format("(assign continue (label %s))", procReturn)).
-                    addInst("(assign val (op compiled-procedure-entry) (reg proc))").
-                    addInst("(goto (reg val))").
-                    addInst(procReturn).
-                    addInst(String.format("(assign %s (reg val))", context.getTarget())).
-                    addInst("(restore continue)").
-                    addInst("(goto (reg continue))").
-                    build();
+            // Set Target and return
+            throw new IllegalStateException("Impossible");
         }
     }
 
     @Override
     public InstSequence visit(QuoteEvaluation e, Context context) {
         InstSequence instSequence = new InstSequenceBuilder().
-                addModifies(context.getTarget()).
-                addInst(String.format("(assign %s (const %s))", context.getTarget(), e.getName())).
+                setType(ASSIGN).
+                setReg(context.getTarget()).
+                addParameter(conzt("(quote " + e.toString() + ")")).
                 build();
         return endWithLinkage(context.getLinkage(), instSequence);
     }
@@ -294,10 +352,43 @@ public class Compiler implements EvaluationVisitor<Context, InstSequence> {
     @Override
     public InstSequence visit(VariableEvaluation e, Context context) {
         InstSequence instSequence = new InstSequenceBuilder().
-                addNeeds("env").
-                addModifies(context.getTarget()).
-                addInst(String.format("(assign %s (op lookup-variable-value) (const %s) (reg env))", context.getTarget(), e.getName())).
+                setType(ASSIGN).
+                setReg(context.getTarget()).
+                addParameter(op("lookup-variable-value")).
+                addParameter(conzt("(quote " + e.getName() + ")")).
+                addParameter(reg(ENV)).
                 build();
         return endWithLinkage(context.getLinkage(), instSequence);
+    }
+
+    @Override
+    public InstSequence visit(AssignmentEvaluation e, Context context) {
+        InstSequence getValueInsts = e.getValue().accept(this, new Context(VAL, LINKAGE_NEXT));
+
+        InstSequence instSequence = append(
+                new InstSequenceBuilder().
+                        setType(PERFORM).
+                        addParameter(op("set-variable-value!")).
+                        addParameter(conzt("(quote "+e.getName()+")")).
+                        addParameter(reg(VAL)).
+                        addParameter(reg(ENV)).
+                        build(),
+                new InstSequenceBuilder().
+                        setType(ASSIGN).
+                        setReg(context.getTarget()).
+                        addParameter(conzt("(quote ok)")).
+                        build()
+        );
+        return endWithLinkage(context.getLinkage(), preserving(getValueInsts, instSequence, ENV));
+    }
+
+    @Override
+    public InstSequence visit(AMBEvaluation e, Context context) {
+        throw new IllegalStateException("Compile an AMBEvaluation.");
+    }
+
+    @Override
+    public InstSequence visit(TrivialEvaluation e, Context context) {
+        throw new IllegalStateException("Compile a TrivialEvaluation.");
     }
 }

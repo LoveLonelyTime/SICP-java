@@ -1,62 +1,72 @@
 package parser;
 
-import java.util.Optional;
-
 public class LispParser {
-    private LispParser() {}
-    private static void skipSpace(Cursor cursor){
-        while (cursor.hasNext() && Character.isWhitespace(cursor.top())){
+    private LispParser() {
+    }
+
+    private static void skipSpace(Cursor cursor) {
+        while (!cursor.eof() && Character.isWhitespace(cursor.top())) {
             cursor.next();
         }
     }
 
-    private static boolean isNameChar(char c){
-        return c != '(' && c != ')' && !Character.isWhitespace(c);
+    private static boolean isSymbolChar(Cursor cursor) {
+        return !cursor.eof() &&
+                cursor.top() != '(' &&
+                cursor.top() != ')' &&
+                cursor.top() != '.' &&
+                !Character.isWhitespace(cursor.top());
     }
 
-    private static Optional<Expression> parseSymbol(Cursor cursor){
-        Cursor tryCursor = cursor.branch();
+    private static SymbolExpression parseSymbol(Cursor cursor) {
+        skipSpace(cursor);
 
-        skipSpace(tryCursor);
-        if(!tryCursor.hasNext()) return Optional.empty();
-
-        StringBuilder name = new StringBuilder();
-
-        while(tryCursor.hasNext() && isNameChar(tryCursor.top())){
-            name.append(tryCursor.top());
-            tryCursor.next();
+        StringBuilder symbol = new StringBuilder();
+        while (isSymbolChar(cursor)) {
+            symbol.append(cursor.top());
+            cursor.next();
         }
 
-        if(name.length() == 0) return Optional.empty();
-        cursor.merge(tryCursor);
-        return Optional.of(new SymbolExpression(name.toString()));
+        if (symbol.length() == 0) throw new ParserException(cursor, "Empty symbol.");
+        return new SymbolExpression(symbol.toString());
     }
 
-    public static Optional<Expression> parseExpression(Cursor cursor){
-        Cursor tryCursor = cursor.branch();
+    /*
+     * Rest -> . Expression )
+     * Rest -> )
+     * Rest -> Expression Rest
+     */
+    private static Expression parseRest(Cursor cursor) {
+        skipSpace(cursor);
 
-        skipSpace(tryCursor);
-        if(!tryCursor.hasNext()) return Optional.empty();
+        if (cursor.expectChar('.')) { // Rest -> . Expression )
+            Expression e = parseExpression(cursor);
 
-        if(tryCursor.top() == '('){
-            tryCursor.next();
-            ListExpression list = new ListExpression();
-            while (true){
-                Optional<Expression> exp = parseExpression(tryCursor);
-                if(exp.isPresent()){
-                    list.add(exp.get());
-                }else{
-                    break;
-                }
+            skipSpace(cursor);
+            if (cursor.expectChar(')')) { // OK
+                return e;
+            } else {
+                throw new ParserException(cursor, "'.' isn't the last one.");
             }
+        } else if (cursor.expectChar(')')) { // Rest -> )
+            return NilExpression.SINGLETON;
+        } else { // Rest -> Expression Rest
+            Expression head = parseExpression(cursor);
+            Expression tail = parseRest(cursor);
+            return new PairExpression(head, tail);
+        }
+    }
 
-            skipSpace(tryCursor);
-            if(!tryCursor.hasNext()) return Optional.empty();
-            if(tryCursor.top() != ')') return Optional.empty();
-            tryCursor.next();
-            cursor.merge(tryCursor);
-            return Optional.of(list);
-        }else{
+    /*
+     * Expression -> ( Rest
+     * Expression -> Symbol
+     */
+    public static Expression parseExpression(Cursor cursor) {
+        skipSpace(cursor);
+
+        if (cursor.expectChar('(')) { // Expression -> ( Rest
+            return parseRest(cursor);
+        } else { // Expression -> Symbol
             return parseSymbol(cursor);
         }
     }

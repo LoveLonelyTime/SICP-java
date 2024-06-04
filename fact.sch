@@ -19,5 +19,5 @@ base-case
     (assign val (const 1))
     (goto (reg continue))
 fact-done
-    (perform (op print!) (reg val))
+    (perform (op print) (reg val))
 ))

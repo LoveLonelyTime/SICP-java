@@ -1,8 +1,9 @@
 ((exp continue env unev val argl proc)
 (
-start
-    (assign exp (op read))
     (assign env (op get-global-environment))
+start
+    (perform (op print) (const (quote ?>>)))
+    (assign exp (op read-expression))
     (assign continue (label print-result))
     (goto (label eval-dispatch))
 
@@ -28,13 +29,13 @@ eval-dispatch
     (goto (label unknown-expression-type))
 
 ev-self-eval
-    (assign val (op text-of-number) (reg exp))
+    (assign val (op cast-number) (reg exp))
     (goto (reg continue))
 ev-variable
     (assign val (op lookup-variable-value) (reg exp) (reg env))
     (goto (reg continue))
 ev-quoted
-    (assign val (op text-of-quotation) (reg exp))
+    (assign val (reg exp))
     (goto (reg continue))
 ev-lambda
     (assign unev (op lambda-parameters) (reg exp))
@@ -89,7 +90,7 @@ apply-dispatch
     (branch (label compound-apply))
     (goto (label unknown-procedure-type))
 primitive-apply
-    (assign val (op apply-primitive-procedure) (reg proc) (reg argl) (reg env))
+    (assign val (op apply-primitive-procedure) (reg proc) (reg argl))
     (restore continue)
     (goto (reg continue))
 compound-apply
@@ -153,7 +154,7 @@ ev-assignment-1
     (restore env)
     (restore unev)
     (perform (op set-variable-value!) (reg unev) (reg val) (reg env))
-    (assign val (const ok))
+    (assign val (const (quote ok)))
     (goto (reg continue))
 
 ev-definition
@@ -169,23 +170,20 @@ ev-definition-1
     (restore env)
     (restore unev)
     (perform (op define-variable!) (reg unev) (reg val) (reg env))
-    (assign val (const ok))
+    (assign val (const (quote ok)))
     (goto (reg continue))
 
 print-result
-    (perform (op print!) (reg val))
-    (goto (label end))
+    (perform (op print) (reg val))
+    (goto (label start))
 
 unknown-expression-type
-    (assign val (const unknown-expression-type-error))
+    (assign val (const (quote Unknown-Expression-Type-Error)))
     (goto (label signal-error))
 unknown-procedure-type
     (restore continue)
-    (assign val (const unknown-procedure-type-error))
+    (assign val (const (quote Unknown-Procedure-Type-Error)))
     (goto (label signal-error))
 signal-error
-    (perform (op print!) (reg val))
-    (goto (label end))
-
-end
+    (perform (op error) (reg val))
 ))
